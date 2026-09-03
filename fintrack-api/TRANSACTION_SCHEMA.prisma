@@ -1,0 +1,106 @@
+/**
+ * Prisma Schema - Transaction Model
+ *
+ * Defines the Transaction table structure in PostgreSQL.
+ *
+ * Schema includes:
+ * - Proper indexing for query performance
+ * - Decimal precision for financial amounts
+ * - Enum types for status and type
+ * - Audit timestamps (createdAt, updatedAt)
+ * - Proper foreign key relationship to User
+ *
+ * Add this to your prisma/schema.prisma file:
+ *
+ * @file prisma/schema.prisma
+ */
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/**
+ * Transaction enum - Type of transaction
+ */
+enum TransactionType {
+  TRANSFER
+  DEPOSIT
+  WITHDRAWAL
+  PAYMENT
+}
+
+/**
+ * Transaction enum - Current status
+ */
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+/**
+ * Transaction model - Represents a financial transaction
+ */
+model Transaction {
+  /// Unique identifier (CUID format)
+  id String @id @default(cuid())
+
+  /// User who performed the transaction (foreign key)
+  userId String @db.Uuid
+
+  /// Transaction amount with 2 decimal places precision
+  /// Maximum value: 999,999,999.99
+  amount Decimal @db.Decimal(15, 2)
+
+  /// Optional transaction description (max 500 chars, stored in DB with longer limit for safety)
+  description String? @db.VarChar(500)
+
+  /// Type of transaction (TRANSFER, DEPOSIT, WITHDRAWAL, PAYMENT)
+  type TransactionType
+
+  /// Current status of transaction
+  status TransactionStatus @default(COMPLETED)
+
+  /// Timestamp when transaction was created
+  createdAt DateTime @default(now())
+
+  /// Timestamp when transaction was last updated
+  updatedAt DateTime @updatedAt
+
+  /// Indexes for query performance
+  /// Index 1: Query transactions by userId (most common operation)
+  @@index([userId])
+
+  /// Index 2: Composite index for pagination queries
+  @@index([userId, createdAt(sort: Desc)])
+
+  /// Index 3: Query by status for reporting
+  @@index([status])
+
+  /// Index 4: Query by type for analytics
+  @@index([type])
+
+  /// Foreign key constraint (uncomment when User model exists)
+  // @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/**
+ * Planned User model (for reference)
+ *
+ * model User {
+ *   id           String   @id @default(cuid())
+ *   email        String   @unique
+ *   name         String?
+ *   passwordHash String
+ *   createdAt    DateTime @default(now())
+ *   updatedAt    DateTime @updatedAt
+ *
+ *   transactions Transaction[]
+ * }
+ */

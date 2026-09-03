@@ -1,0 +1,249 @@
+/**
+ * Shared Expense Module - Prisma Schema Definition
+ *
+ * Defines the SharedExpense model and related enums for the expense-sharing feature.
+ *
+ * Features:
+ * - Multiple split types (EQUAL, BY_AMOUNT, BY_PERCENTAGE, ITEMIZED)
+ * - Participant tracking with individual amounts
+ * - Creator identification and audit timestamps
+ * - Proper indexing for query performance
+ *
+ * Add this to your prisma/schema.prisma file
+ *
+ * @file prisma/schema.prisma (Shared Expense section)
+ */
+
+// ===== ENUMS =====
+
+/**
+ * Split type enum - defines how expense is divided among participants
+ */
+enum ExpenseSplitType {
+  EQUAL           // Divide equally among all participants
+  BY_AMOUNT       // Divide by specific amounts per person
+  BY_PERCENTAGE   // Divide by percentage per person
+  ITEMIZED        // Divide by items (person A owes for items 1,2; person B owes for items 3,4)
+}
+
+/**
+ * Settlement status enum - tracks payment resolution
+ */
+enum SettlementStatus {
+  PENDING         // Expense created, not yet settled
+  PARTIALLY_PAID  // Some participants have paid
+  SETTLED         // All participants have settled their share
+  CANCELLED       // Expense was cancelled
+}
+
+// ===== MODELS =====
+
+/**
+ * SharedExpense model - represents an expense shared among multiple people
+ *
+ * Example use cases:
+ * - Roommates splitting rent and utilities
+ * - Friends splitting restaurant bill
+ * - Group trip expenses
+ * - Office shared supplies
+ *
+ * Database size estimate:
+ * - ~500 bytes per base record
+ * - Plus participants relationship (see SharedExpenseParticipant model)
+ */
+model SharedExpense {
+  /// Unique identifier (CUID format)
+  id String @id @default(cuid())
+
+  /// User who created the expense (foreign key to User model)
+  creatorId String @db.Uuid
+
+  /// Relationship to creator user (uncomment when User model exists)
+  // creator User @relation("CreatedExpenses", fields: [creatorId], references: [id], onDelete: Cascade)
+
+  /// Human-readable description/reason for expense
+  /// Examples: "Dinner at Luigi's", "Monthly rent", "Gas for road trip"
+  description String @db.VarChar(500)
+
+  /// Total expense amount (e.g., 150.50 for $150.50)
+  /// Precision: 2 decimal places for currency
+  totalAmount Decimal @db.Decimal(15, 2)
+
+  /// How the expense should be split among participants
+  splitType ExpenseSplitType @default(EQUAL)
+
+  /// Current settlement status
+  status SettlementStatus @default(PENDING)
+
+  /// Optional category for expense tracking
+  /// Examples: "FOOD", "RENT", "UTILITIES", "ENTERTAINMENT", "TRAVEL", "SUPPLIES"
+  category String? @db.VarChar(50)
+
+  /// Optional notes/comments about the expense
+  notes String? @db.VarChar(1000)
+
+  /// Date when the expense occurred (may differ from createdAt)
+  expenseDate DateTime?
+
+  /// Timestamp when record was created
+  createdAt DateTime @default(now())
+
+  /// Timestamp when record was last updated
+  updatedAt DateTime @updatedAt
+
+  /// Relationship to participants in this expense
+  participants SharedExpenseParticipant[]
+
+  /// Relationship to settlement records
+  settlements ExpenseSettlement[]
+
+  /// Indexes for query performance
+  @@index([creatorId])
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+  @@index([creatorId, status])
+}
+
+/**
+ * SharedExpenseParticipant model - tracks who is part of an expense and how much they owe/paid
+ *
+ * Represents the many-to-many relationship between expenses and participants
+ * Stores both the owed amount and paid amount to track settlement progress
+ *
+ * Example:
+ * Expense: "Dinner $100"
+ * Participants:
+ * - Alice: owes $25, paid $0
+ * - Bob: owes $25, paid $25
+ * - Charlie: owes $25, paid $0
+ * - Diana: owes $25, paid $25
+ */
+model SharedExpenseParticipant {
+  /// Unique identifier
+  id String @id @default(cuid())
+
+  /// Reference to the shared expense
+  expenseId String
+  expense SharedExpense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  /// User ID of participant (foreign key to User model)
+  userId String @db.Uuid
+
+  /// Relationship to participant user (uncomment when User model exists)
+  // user User @relation("ExpenseParticipations", fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Amount this participant owes (total share)
+  /// Example: If expense is $100 split equally among 4 people, owedAmount = 25.00
+  owedAmount Decimal @db.Decimal(15, 2)
+
+  /// Amount this participant has already paid
+  /// Starts at 0, increases as payments are recorded
+  paidAmount Decimal @db.Decimal(15, 2) @default(0)
+
+  /// Notes about this participant's involvement
+  /// Example: "Paid for wine", "Brought dessert"
+  notes String? @db.VarChar(500)
+
+  /// Timestamp when participant was added
+  createdAt DateTime @default(now())
+
+  /// Timestamp when participation record was last updated
+  updatedAt DateTime @updatedAt
+
+  /// Composite unique index - prevent duplicate participants in same expense
+  @@unique([expenseId, userId])
+
+  /// Indexes for queries
+  @@index([expenseId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+/**
+ * ExpenseSettlement model - tracks payment records between participants
+ *
+ * Records each payment made to settle an expense
+ * Enables full audit trail of who paid whom and when
+ *
+ * Example:
+ * Expense ID: exp_123
+ * Alice paid Charlie: $25 on 2024-01-15
+ * Charlie paid Diana: $25 on 2024-01-16
+ */
+model ExpenseSettlement {
+  /// Unique identifier
+  id String @id @default(cuid())
+
+  /// Reference to the shared expense
+  expenseId String
+  expense SharedExpense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  /// User ID of person who paid (foreign key to User model)
+  paidByUserId String @db.Uuid
+
+  /// Relationship to payer user (uncomment when User model exists)
+  // paidByUser User @relation("SentSettlements", fields: [paidByUserId], references: [id])
+
+  /// User ID of person who received payment (foreign key to User model)
+  paidToUserId String @db.Uuid
+
+  /// Relationship to payee user (uncomment when User model exists)
+  // paidToUser User @relation("ReceivedSettlements", fields: [paidToUserId], references: [id])
+
+  /// Amount paid in this settlement transaction
+  /// Example: $25.50
+  amount Decimal @db.Decimal(15, 2)
+
+  /// Payment method used
+  /// Examples: "CASH", "VENMO", "PAYPAL", "BANK_TRANSFER", "CARD"
+  paymentMethod String @db.VarChar(50)
+
+  /// Optional transaction ID or reference number
+  /// Example: "VENMO_12345", "TXN_abc123"
+  transactionReference String? @db.VarChar(100)
+
+  /// Timestamp when payment was recorded
+  settledAt DateTime @default(now())
+
+  /// Timestamp when settlement record was created
+  createdAt DateTime @default(now())
+
+  /// Composite unique index to prevent duplicate settlement records
+  @@unique([expenseId, paidByUserId, paidToUserId, settledAt])
+
+  /// Indexes for queries
+  @@index([expenseId])
+  @@index([paidByUserId])
+  @@index([paidToUserId])
+  @@index([settledAt])
+}
+
+// ===== USER MODEL EXTENSION =====
+// When you have a User model, add these relations:
+
+/*
+model User {
+  id String @id @default(cuid())
+  email String @unique
+  name String?
+  // ... other fields ...
+
+  // Expenses this user created
+  createdExpenses SharedExpense[] @relation("CreatedExpenses")
+
+  // Expenses this user participates in
+  expenseParticipations SharedExpenseParticipant[] @relation("ExpenseParticipations")
+
+  // Payments this user sent
+  sentSettlements ExpenseSettlement[] @relation("SentSettlements")
+
+  // Payments this user received
+  receivedSettlements ExpenseSettlement[] @relation("ReceivedSettlements")
+
+  // Transaction records (optional, for full audit trail)
+  transactions Transaction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+*/
